@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ESP32 DAC Control</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 20px;
+    color: #222;
+  }
+  h1 { font-size: 1.4rem; }
+  #status {
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: #f2f2f2;
+    margin-bottom: 20px;
+    font-size: 0.9rem;
+  }
+  #status.connected { background: #d9f7d9; color: #1b6e1b; }
+  #status.disconnected { background: #fbe0e0; color: #a33; }
+
+  button {
+    padding: 8px 16px;
+    font-size: 0.95rem;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+  }
+  #connectBtn { background: #2b7de9; color: white; margin-bottom: 24px; }
+  .sendBtn { background: #2eab4a; color: white; }
+  .exportBtn { background: #7a4fd1; color: white; margin-right: 8px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .channels { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .channel {
+    border: 1px solid #e2e2e2;
+    border-radius: 10px;
+    padding: 14px 16px;
+    flex: 1;
+    min-width: 200px;
+  }
+  .channel h3 { margin: 0 0 10px 0; font-size: 0.95rem; }
+  .channel .row { display: flex; align-items: center; gap: 8px; }
+  input[type=range] { flex: 1; }
+  input[type=number] { width: 60px; padding: 6px; }
+  .valueLabel { font-weight: 600; min-width: 46px; text-align: right; font-size: 0.85rem; }
+
+  #chartWrap { margin: 24px 0; }
+  #liveChart { width: 100%; max-height: 320px; }
+
+  .exportRow { margin-bottom: 12px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 10px; }
+  th, td { border-bottom: 1px solid #eee; padding: 4px 6px; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  #logTableWrap { max-height: 200px; overflow-y: auto; }
+
+  #log {
+    margin-top: 20px;
+    font-family: monospace;
+    font-size: 0.8rem;
+    background: #111;
+    color: #0f0;
+    padding: 10px;
+    border-radius: 8px;
+    height: 120px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+
+<h1>ESP32 DAC Controller</h1>
+<div id="status" class="disconnected">Not connected</div>
+<button id="connectBtn">Connect to ESP32</button>
+
+<div class="channels">
+  <div class="channel">
+    <h3>DAC1 &mdash; GPIO25 (0&ndash;3.3V)</h3>
+    <div class="row">
+      <input type="range" id="d1Range" min="0" max="3.3" step="0.01" value="0">
+      <span class="valueLabel" id="d1Label">0.00 V</span>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <input type="number" id="d1Number" min="0" max="3.3" step="0.01" value="0">
+      <button class="sendBtn" id="d1Send" disabled>Send</button>
+    </div>
+  </div>
+
+  <div class="channel">
+    <h3>DAC2 &mdash; GPIO26 (0&ndash;3.3V)</h3>
+    <div class="row">
+      <input type="range" id="d2Range" min="0" max="3.3" step="0.01" value="0">
+      <span class="valueLabel" id="d2Label">0.00 V</span>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <input type="number" id="d2Number" min="0" max="3.3" step="0.01" value="0">
+      <button class="sendBtn" id="d2Send" disabled>Send</button>
+    </div>
+  </div>
+
+  <div class="channel">
+    <h3>MCP4725 (0&ndash;2.0V ceiling)</h3>
+    <div class="row">
+      <input type="range" id="mcpRange" min="0" max="2.0" step="0.01" value="0">
+      <span class="valueLabel" id="mcpLabel">0.00 V</span>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <input type="number" id="mcpNumber" min="0" max="2.0" step="0.01" value="0">
+      <button class="sendBtn" id="mcpSend" disabled>Send</button>
+    </div>
+  </div>
+</div>
+
+<div id="chartWrap">
+  <canvas id="liveChart"></canvas>
+</div>
+
+<div class="exportRow">
+  <button class="exportBtn" id="exportCsvBtn">Export CSV</button>
+  <button class="exportBtn" id="exportPngBtn">Export Graph (PNG)</button>
+  <button class="exportBtn" id="clearLogBtn">Clear Log</button>
+</div>
+
+<div id="logTableWrap">
+  <table id="logTable">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>D1 set</th><th>D1 meas</th>
+        <th>D2 set</th><th>D2 meas</th>
+        <th>MCP set</th><th>MCP meas</th>
+      </tr>
+    </thead>
+    <tbody id="logTableBody"></tbody>
+  </table>
+</div>
+
+<div id="log"></div>
+
+<script>
+  const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+  const CONTROL_CHARACTERISTIC_UUID   = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+  const TELEMETRY_CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a9";
+
+  let bleDevice = null;
+  let controlCharacteristic = null;
+  let telemetryCharacteristic = null;
+
+  // In-memory log: each entry is {time, d1set, d1meas, d2set, d2meas, mcpset, mcpmeas}
+  const dataLog = [];
+  const MAX_POINTS_ON_CHART = 60; // keep the live chart from becoming unreadable
+
+  const statusEl = document.getElementById("status");
+  const connectBtn = document.getElementById("connectBtn");
+  const logEl = document.getElementById("log");
+  const logTableBody = document.getElementById("logTableBody");
+
+  function log(msg) {
+    const time = new Date().toLocaleTimeString();
+    logEl.textContent += `[${time}] ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setConnected(isConnected) {
+    document.querySelectorAll(".sendBtn").forEach(b => b.disabled = !isConnected);
+    if (isConnected) {
+      statusEl.textContent = "Connected";
+      statusEl.className = "connected";
+      connectBtn.textContent = "Reconnect";
+    } else {
+      statusEl.textContent = "Not connected";
+      statusEl.className = "disconnected";
+    }
+  }
+
+  // --------------------------------------------------
+  // Chart setup
+  // --------------------------------------------------
+  const ctx = document.getElementById("liveChart").getContext("2d");
+  const chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        { label: "D1 set",   data: [], borderColor: "#2b7de9", borderDash: [4,2], pointRadius: 0 },
+        { label: "D1 meas",  data: [], borderColor: "#2b7de9", pointRadius: 0 },
+        { label: "D2 set",   data: [], borderColor: "#2eab4a", borderDash: [4,2], pointRadius: 0 },
+        { label: "D2 meas",  data: [], borderColor: "#2eab4a", pointRadius: 0 },
+        { label: "MCP set",  data: [], borderColor: "#d1622a", borderDash: [4,2], pointRadius: 0 },
+        { label: "MCP meas", data: [], borderColor: "#d1622a", pointRadius: 0 },
+      ]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      scales: {
+        y: { title: { display: true, text: "Volts" }, suggestedMin: 0 }
+      }
+    }
+  });
+
+  function pushToChart(entry) {
+    chart.data.labels.push(entry.time);
+    chart.data.datasets[0].data.push(entry.d1set);
+    chart.data.datasets[1].data.push(entry.d1meas);
+    chart.data.datasets[2].data.push(entry.d2set);
+    chart.data.datasets[3].data.push(entry.d2meas);
+    chart.data.datasets[4].data.push(entry.mcpset);
+    chart.data.datasets[5].data.push(entry.mcpmeas);
+
+    if (chart.data.labels.length > MAX_POINTS_ON_CHART) {
+      chart.data.labels.shift();
+      chart.data.datasets.forEach(ds => ds.data.shift());
+    }
+    chart.update();
+  }
+
+  function pushToTable(entry) {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${entry.time}</td>
+      <td>${entry.d1set.toFixed(2)}</td><td>${entry.d1meas.toFixed(2)}</td>
+      <td>${entry.d2set.toFixed(2)}</td><td>${entry.d2meas.toFixed(2)}</td>
+      <td>${entry.mcpset.toFixed(2)}</td><td>${entry.mcpmeas.toFixed(2)}</td>
+    `;
+    logTableBody.appendChild(row);
+    logTableBody.parentElement.parentElement.scrollTop = logTableBody.parentElement.parentElement.scrollHeight;
+  }
+
+  // --------------------------------------------------
+  // Connect
+  // --------------------------------------------------
+  connectBtn.addEventListener("click", async () => {
+    if (!navigator.bluetooth) {
+      log("ERROR: Web Bluetooth not supported. Use Chrome or Edge.");
+      return;
+    }
+    try {
+      log("Requesting Bluetooth device...");
+      bleDevice = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SERVICE_UUID] }]
+      });
+
+      bleDevice.addEventListener("gattserverdisconnected", () => {
+        log("Device disconnected.");
+        setConnected(false);
+      });
+
+      log("Connecting to GATT server...");
+      const server = await bleDevice.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+
+      log("Getting control characteristic...");
+      controlCharacteristic = await service.getCharacteristic(CONTROL_CHARACTERISTIC_UUID);
+
+      log("Getting telemetry characteristic and subscribing...");
+      telemetryCharacteristic = await service.getCharacteristic(TELEMETRY_CHARACTERISTIC_UUID);
+      await telemetryCharacteristic.startNotifications();
+      telemetryCharacteristic.addEventListener("characteristicvaluechanged", onTelemetryReceived);
+
+      log("Connected and ready.");
+      setConnected(true);
+    } catch (err) {
+      log("Connection failed: " + err);
+      setConnected(false);
+    }
+  });
+
+  // --------------------------------------------------
+  // Telemetry: "d1set,d1meas,d2set,d2meas,mcpset,mcpmeas"
+  // --------------------------------------------------
+  function onTelemetryReceived(event) {
+    const decoder = new TextDecoder("utf-8");
+    const text = decoder.decode(event.target.value);
+    const parts = text.split(",").map(parseFloat);
+
+    if (parts.length !== 6 || parts.some(isNaN)) {
+      log("Malformed telemetry: " + text);
+      return;
+    }
+
+    const entry = {
+      time: new Date().toLocaleTimeString(),
+      d1set: parts[0], d1meas: parts[1],
+      d2set: parts[2], d2meas: parts[3],
+      mcpset: parts[4], mcpmeas: parts[5],
+    };
+
+    dataLog.push(entry);
+    pushToChart(entry);
+    pushToTable(entry);
+  }
+
+  // --------------------------------------------------
+  // Sending control values
+  // --------------------------------------------------
+  async function sendValue(channelPrefix, voltage) {
+    if (!controlCharacteristic) {
+      log("Not connected yet.");
+      return;
+    }
+    const message = `${channelPrefix}:${voltage.toFixed(2)}`;
+    try {
+      const encoder = new TextEncoder();
+      await controlCharacteristic.writeValue(encoder.encode(message));
+      log("Sent: " + message);
+    } catch (err) {
+      log("Send failed: " + err);
+    }
+  }
+
+  function wireChannel(prefix, rangeId, numberId, labelId, sendBtnId) {
+    const range = document.getElementById(rangeId);
+    const number = document.getElementById(numberId);
+    const label = document.getElementById(labelId);
+    const sendBtn = document.getElementById(sendBtnId);
+
+    function updateLabel(v) { label.textContent = parseFloat(v).toFixed(2) + " V"; }
+
+    range.addEventListener("input", () => {
+      number.value = range.value;
+      updateLabel(range.value);
+    });
+    number.addEventListener("input", () => {
+      const min = parseFloat(range.min), max = parseFloat(range.max);
+      let v = Math.min(max, Math.max(min, parseFloat(number.value) || 0));
+      range.value = v;
+      updateLabel(v);
+    });
+    sendBtn.addEventListener("click", () => sendValue(prefix, parseFloat(range.value)));
+  }
+
+  wireChannel("D1",  "d1Range",  "d1Number",  "d1Label",  "d1Send");
+  wireChannel("D2",  "d2Range",  "d2Number",  "d2Label",  "d2Send");
+  wireChannel("MCP", "mcpRange", "mcpNumber", "mcpLabel", "mcpSend");
+
+  // --------------------------------------------------
+  // Export: CSV
+  // --------------------------------------------------
+  document.getElementById("exportCsvBtn").addEventListener("click", () => {
+    if (dataLog.length === 0) {
+      log("Nothing to export yet.");
+      return;
+    }
+    const header = "time,d1_set,d1_measured,d2_set,d2_measured,mcp_set,mcp_measured\n";
+    const rows = dataLog.map(e =>
+      `${e.time},${e.d1set},${e.d1meas},${e.d2set},${e.d2meas},${e.mcpset},${e.mcpmeas}`
+    ).join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "dac_log_" + Date.now() + ".csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    log("CSV exported.");
+  });
+
+  // --------------------------------------------------
+  // Export: PNG of the chart
+  // --------------------------------------------------
+  document.getElementById("exportPngBtn").addEventListener("click", () => {
+    const url = chart.toBase64Image();
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "dac_graph_" + Date.now() + ".png";
+    a.click();
+    log("Graph exported.");
+  });
+
+  // --------------------------------------------------
+  // Clear log
+  // --------------------------------------------------
+  document.getElementById("clearLogBtn").addEventListener("click", () => {
+    dataLog.length = 0;
+    chart.data.labels = [];
+    chart.data.datasets.forEach(ds => ds.data = []);
+    chart.update();
+    logTableBody.innerHTML = "";
+    log("Log cleared.");
+  });
+</script>
+
+</body>
+</html>
