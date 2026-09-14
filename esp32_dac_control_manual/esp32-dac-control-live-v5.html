@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 DAC Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<style>
+  :root{
+    --page:#17181B;
+    --panel:#212327;
+    --panel-raised:#292C31;
+    --groove:#15171A;
+    --ink:#ECE7DC;
+    --muted:#8D9095;
+    --line:#3A3D42;
+    --amber:#E2A83F;
+    --amber-ink:#1B1C1F;
+    --cyan:#57C7B4;
+    --good:#6FBF8B;
+    --good-bg:rgba(111,191,139,0.12);
+    --bad:#E2685A;
+    --bad-bg:rgba(226,104,90,0.14);
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--page);
+    color:var(--ink);
+    font-family:'Inter', system-ui, sans-serif;
+    font-size:14px;
+    line-height:1.5;
+  }
+  .wrap{ max-width:1180px; margin:0 auto; padding:28px 24px 60px; }
+
+  h1,h2,h3,h4{ font-family:'Oswald', sans-serif; font-weight:500; }
+
+  /* ---------- header ---------- */
+  header.top{
+    display:flex; justify-content:space-between; align-items:flex-start;
+    flex-wrap:wrap; gap:16px;
+    padding-bottom:20px; margin-bottom:26px;
+    border-bottom:1px solid var(--line);
+  }
+  header.top h1{ margin:0 0 4px; font-size:1.6rem; color:var(--ink); }
+  header.top p{ margin:0; color:var(--muted); max-width:46ch; }
+  .status-block{ display:flex; flex-direction:column; align-items:flex-end; gap:12px; }
+  .status-line{
+    display:flex; align-items:center; gap:8px;
+    font-family:'Space Mono', monospace; font-size:0.78rem; color:var(--muted);
+  }
+  .led{ width:8px; height:8px; border-radius:50%; background:var(--bad); box-shadow:0 0 6px var(--bad); }
+  .led.connected{ background:var(--good); box-shadow:0 0 7px var(--good); }
+
+  button{
+    font-family:'Inter', sans-serif;
+    font-size:0.86rem;
+    font-weight:500;
+    padding:9px 16px;
+    border-radius:var(--radius);
+    border:1px solid transparent;
+    cursor:pointer;
+    transition:background 0.15s, border-color 0.15s;
+  }
+  button:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+  button:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  #connectBtn{ background:var(--amber); color:var(--amber-ink); }
+  #connectBtn:hover:not(:disabled){ background:#eeb959; }
+
+  .sendBtn{ background:var(--amber); color:var(--amber-ink); }
+  .sendBtn:hover:not(:disabled){ background:#eeb959; }
+
+  .ghostBtn{ background:transparent; color:var(--ink); border-color:var(--line); }
+  .ghostBtn:hover:not(:disabled){ background:var(--groove); }
+
+  .tinyBtn{
+    font-size:0.74rem; padding:5px 10px; background:transparent; color:var(--muted);
+    border:1px solid var(--line);
+  }
+  .tinyBtn:hover:not(:disabled){ background:var(--groove); color:var(--ink); }
+
+  /* ---------- section framing ---------- */
+  section{ margin-bottom:34px; }
+  .section-head{
+    display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    padding-bottom:10px; margin-bottom:16px;
+    border-bottom:1px solid var(--line);
+  }
+  .section-head h2{ margin:0; font-size:1.05rem; }
+  .section-head p{ margin:0; font-size:0.82rem; color:var(--muted); }
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:20px 22px;
+  }
+
+  /* ---------- channel controls ---------- */
+  .channels{ display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; }
+  .channel{ background:var(--panel-raised); border:1px solid var(--line); border-radius:var(--radius); padding:16px 16px 14px; }
+  .channel h3{ margin:0 0 2px; font-size:1rem; color:var(--amber); }
+  .channel .sub{ margin:0 0 14px; font-size:0.76rem; color:var(--muted); }
+  .channel .row{ display:flex; align-items:center; gap:10px; }
+
+  input[type=number], select{
+    font-family:'Space Mono', monospace; font-size:0.82rem;
+    padding:7px 8px; border:1px solid var(--line); border-radius:var(--radius);
+    background:var(--groove); color:var(--ink);
+  }
+  input[type=number]{ width:68px; }
+  select{ font-family:'Inter', sans-serif; min-width:132px; max-width:230px; }
+  /* Native dropdown lists inherit the page's dark palette on platforms
+     that allow it, so the options aren't dark-on-dark. */
+  select option, select optgroup{ background:var(--panel-raised); color:var(--ink); }
+  select optgroup{ font-style:normal; color:var(--muted); }
+
+  input[type=range].fader{
+    -webkit-appearance:none; appearance:none; flex:1; height:5px;
+    background:var(--groove); border-radius:3px; outline:none;
+  }
+  input[type=range].fader::-webkit-slider-thumb{
+    -webkit-appearance:none; width:10px; height:20px; border-radius:2px;
+    background:var(--amber); border:1px solid #000; cursor:pointer; margin-top:-8px;
+  }
+  input[type=range].fader::-moz-range-track{ background:var(--groove); height:5px; border-radius:3px; }
+  input[type=range].fader::-moz-range-thumb{
+    width:10px; height:20px; border-radius:2px; background:var(--amber); border:1px solid #000; cursor:pointer;
+  }
+
+  .valueLabel{
+    font-family:'Space Mono', monospace; font-weight:700; min-width:58px;
+    text-align:right; font-size:0.85rem; color:var(--amber);
+  }
+  .channel .sendRow{ margin-top:10px; display:flex; align-items:center; gap:10px; }
+  .measReadout{ font-size:0.78rem; color:var(--muted); margin-top:12px; }
+  .measReadout span{
+    font-family:'Space Mono', monospace; font-weight:700; color:var(--cyan);
+    background:var(--groove); padding:2px 7px; border-radius:2px;
+  }
+  .measReadout span.current{ color:var(--good); }
+
+  /* ---------- mode switch (fixed / sweep) ---------- */
+  .modeSwitch{
+    position:relative; display:grid; grid-template-columns:1fr 1fr;
+    background:var(--groove); border-radius:16px; padding:3px; margin-bottom:14px;
+  }
+  .modeSwitch .modeThumb{
+    position:absolute; top:3px; left:3px; width:calc(50% - 3px); height:calc(100% - 6px);
+    background:var(--amber); border-radius:13px; transition:transform 0.18s ease; z-index:0;
+  }
+  .modeSwitch[data-active="sweep"] .modeThumb{ transform:translateX(100%); }
+  .modeBtn{
+    position:relative; z-index:1; background:transparent; border:none;
+    padding:6px 0; color:var(--muted); font-family:'Space Mono', monospace; font-size:0.72rem;
+    cursor:pointer; border-radius:13px;
+  }
+  .modeBtn.isActive{ color:var(--amber-ink); font-weight:700; }
+
+  .modePane.isHidden{ display:none; }
+
+  .sweepGrid{ display:grid; grid-template-columns:repeat(2, 1fr); gap:10px; margin-bottom:12px; }
+  .sweepGrid .field{ display:flex; flex-direction:column; gap:4px; }
+  .sweepGrid label{ font-size:0.68rem; color:var(--muted); }
+  .sweepGrid input{ width:100%; }
+  .sweepRunRow{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .sweepStatus{ font-family:'Space Mono', monospace; font-size:0.74rem; color:var(--muted); }
+
+  /* ---------- stats strip ---------- */
+  .stats{ display:flex; gap:28px; flex-wrap:wrap; margin-top:16px; padding-top:16px; border-top:1px solid var(--line); }
+  .stat .k{ font-size:0.72rem; color:var(--muted); margin-bottom:2px; }
+  .stat .v{ font-family:'Space Mono', monospace; font-weight:700; font-size:1rem; color:var(--ink); }
+
+  /* ---------- charts ---------- */
+  .chartCanvasWrap{ height:220px; position:relative; }
+  .chartFallback{
+    position:absolute; inset:0; margin:0; padding:0 32px;
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    color:var(--muted); font-size:0.82rem; line-height:1.6;
+  }
+  .chartFallback[hidden]{ display:none; }
+  .chartCanvasWrap.tall{ height:340px; }
+
+  .customControls{
+    display:flex; flex-wrap:wrap; align-items:flex-end; gap:14px; margin-bottom:14px;
+  }
+  .field{ display:flex; flex-direction:column; gap:4px; }
+  .field label{ font-size:0.75rem; color:var(--muted); }
+  .checkField{ display:flex; align-items:center; gap:6px; font-size:0.82rem; color:var(--muted); }
+
+  /* ---------- table ---------- */
+  .tableWrap{ max-height:280px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius); }
+  table{ width:100%; border-collapse:collapse; font-family:'Space Mono', monospace; font-size:0.76rem; }
+  thead th{
+    position:sticky; top:0; background:var(--groove); color:var(--amber);
+    padding:8px 10px; text-align:right; font-weight:700;
+  }
+  thead th:first-child{ text-align:left; }
+  tbody td{ padding:6px 10px; text-align:right; border-bottom:1px solid var(--line); color:var(--ink); }
+  tbody td:first-child{ text-align:left; }
+  tbody tr:nth-child(even){ background:rgba(255,255,255,0.02); }
+
+  /* ---------- export ---------- */
+  .exportRow{ display:flex; flex-wrap:wrap; gap:10px; }
+
+  /* ---------- console ---------- */
+  details.console{ margin-top:8px; }
+  details.console summary{
+    cursor:pointer; font-size:0.82rem; color:var(--muted); padding:6px 0;
+  }
+  #log{
+    margin-top:8px; font-family:'Space Mono', monospace; font-size:0.76rem;
+    background:var(--groove); color:var(--cyan); padding:12px; border-radius:var(--radius);
+    height:130px; overflow-y:auto; white-space:pre-wrap;
+  }
+
+  footer{ margin-top:10px; font-size:0.75rem; color:var(--muted); text-align:center; }
+
+  @media (max-width:560px){
+    .status-block{ align-items:flex-start; }
+    header.top{ flex-direction:column; }
+    .sweepGrid{ grid-template-columns:1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>ESP32 DAC Control</h1>
+      <p>Set and log DAC1, DAC2 and MCP4725 output voltages, monitor measured voltage and current in real time, and export the run for analysis.</p>
+    </div>
+    <div class="status-block">
+      <span class="status-line"><span class="led" id="statusLed"></span><span id="statusText">Not connected</span></span>
+      <button id="connectBtn">Connect to ESP32</button>
+    </div>
+  </header>
+
+  <!-- ================= CHANNEL CONTROLS ================= -->
+  <section>
+    <div class="section-head">
+      <h2>Output channels</h2>
+      <p>Send a fixed voltage, or step through a range automatically</p>
+    </div>
+    <div class="panel">
+      <div class="channels">
+
+        <div class="channel" id="d1Channel">
+          <h3>DAC1</h3>
+          <p class="sub">GPIO25 (0 to 3.3 V)</p>
+
+          <div class="modeSwitch" data-active="fixed">
+            <span class="modeThumb"></span>
+            <button type="button" class="modeBtn isActive" data-mode="fixed">Fixed</button>
+            <button type="button" class="modeBtn" data-mode="sweep">Sweep</button>
+          </div>
+
+          <div class="modePane" data-mode-pane="fixed">
+            <div class="row">
+              <input type="range" class="fader" id="d1Range" min="0" max="3.3" step="0.01" value="0">
+              <span class="valueLabel" id="d1Label">0.00 V</span>
+            </div>
+            <div class="sendRow">
+              <input type="number" id="d1Number" min="0" max="3.3" step="0.01" value="0">
+              <button class="sendBtn" id="d1Send" disabled>Send</button>
+            </div>
+          </div>
+
+          <div class="modePane isHidden" data-mode-pane="sweep">
+            <div class="sweepGrid">
+              <div class="field"><label for="d1SweepMin">Min (V)</label><input type="number" id="d1SweepMin" min="0" max="3.3" step="0.01" value="0"></div>
+              <div class="field"><label for="d1SweepMax">Max (V)</label><input type="number" id="d1SweepMax" min="0" max="3.3" step="0.01" value="3.3"></div>
+              <div class="field"><label for="d1SweepStep">Step (V)</label><input type="number" id="d1SweepStep" min="0.01" max="3.3" step="0.01" value="0.1"></div>
+              <div class="field"><label for="d1SweepDwell">Dwell (ms)</label><input type="number" id="d1SweepDwell" min="20" max="20000" step="10" value="500"></div>
+            </div>
+            <div class="sweepRunRow">
+              <button class="sendBtn" id="d1SweepStart" disabled>Run sweep</button>
+              <button class="tinyBtn" id="d1SweepStop" disabled>Stop</button>
+              <span class="sweepStatus" id="d1SweepStatus">Idle</span>
+            </div>
+          </div>
+
+          <p class="measReadout">Measured <span id="d1MeasReadout">&ndash;</span> <span class="current" id="d1CurReadout">&ndash;</span></p>
+        </div>
+
+        <div class="channel" id="d2Channel">
+          <h3>DAC2</h3>
+          <p class="sub">GPIO26 (0 to 3.3 V)</p>
+
+          <div class="modeSwitch" data-active="fixed">
+            <span class="modeThumb"></span>
+            <button type="button" class="modeBtn isActive" data-mode="fixed">Fixed</button>
+            <button type="button" class="modeBtn" data-mode="sweep">Sweep</button>
+          </div>
+
+          <div class="modePane" data-mode-pane="fixed">
+            <div class="row">
+              <input type="range" class="fader" id="d2Range" min="0" max="3.3" step="0.01" value="0">
+              <span class="valueLabel" id="d2Label">0.00 V</span>
+            </div>
+            <div class="sendRow">
+              <input type="number" id="d2Number" min="0" max="3.3" step="0.01" value="0">
+              <button class="sendBtn" id="d2Send" disabled>Send</button>
+            </div>
+          </div>
+
+          <div class="modePane isHidden" data-mode-pane="sweep">
+            <div class="sweepGrid">
+              <div class="field"><label for="d2SweepMin">Min (V)</label><input type="number" id="d2SweepMin" min="0" max="3.3" step="0.01" value="0"></div>
+              <div class="field"><label for="d2SweepMax">Max (V)</label><input type="number" id="d2SweepMax" min="0" max="3.3" step="0.01" value="3.3"></div>
+              <div class="field"><label for="d2SweepStep">Step (V)</label><input type="number" id="d2SweepStep" min="0.01" max="3.3" step="0.01" value="0.1"></div>
+              <div class="field"><label for="d2SweepDwell">Dwell (ms)</label><input type="number" id="d2SweepDwell" min="20" max="20000" step="10" value="500"></div>
+            </div>
+            <div class="sweepRunRow">
+              <button class="sendBtn" id="d2SweepStart" disabled>Run sweep</button>
+              <button class="tinyBtn" id="d2SweepStop" disabled>Stop</button>
+              <span class="sweepStatus" id="d2SweepStatus">Idle</span>
+            </div>
+          </div>
+
+          <p class="measReadout">Measured <span id="d2MeasReadout">&ndash;</span> <span class="current" id="d2CurReadout">&ndash;</span></p>
+        </div>
+
+        <div class="channel" id="mcpChannel">
+          <h3>MCP4725</h3>
+          <p class="sub">I&sup2;C DAC (0 to 2.0 V ceiling)</p>
+
+          <div class="modeSwitch" data-active="fixed">
+            <span class="modeThumb"></span>
+            <button type="button" class="modeBtn isActive" data-mode="fixed">Fixed</button>
+            <button type="button" class="modeBtn" data-mode="sweep">Sweep</button>
+          </div>
+
+          <div class="modePane" data-mode-pane="fixed">
+            <div class="row">
+              <input type="range" class="fader" id="mcpRange" min="0" max="2.0" step="0.01" value="0">
+              <span class="valueLabel" id="mcpLabel">0.00 V</span>
+            </div>
+            <div class="sendRow">
+              <input type="number" id="mcpNumber" min="0" max="2.0" step="0.01" value="0">
+              <button class="sendBtn" id="mcpSend" disabled>Send</button>
+            </div>
+          </div>
+
+          <div class="modePane isHidden" data-mode-pane="sweep">
+            <div class="sweepGrid">
+              <div class="field"><label for="mcpSweepMin">Min (V)</label><input type="number" id="mcpSweepMin" min="0" max="2.0" step="0.01" value="0"></div>
+              <div class="field"><label for="mcpSweepMax">Max (V)</label><input type="number" id="mcpSweepMax" min="0" max="2.0" step="0.01" value="2.0"></div>
+              <div class="field"><label for="mcpSweepStep">Step (V)</label><input type="number" id="mcpSweepStep" min="0.01" max="2.0" step="0.01" value="0.1"></div>
+              <div class="field"><label for="mcpSweepDwell">Dwell (ms)</label><input type="number" id="mcpSweepDwell" min="20" max="20000" step="10" value="500"></div>
+            </div>
+            <div class="sweepRunRow">
+              <button class="sendBtn" id="mcpSweepStart" disabled>Run sweep</button>
+              <button class="tinyBtn" id="mcpSweepStop" disabled>Stop</button>
+              <span class="sweepStatus" id="mcpSweepStatus">Idle</span>
+            </div>
+          </div>
+
+          <p class="measReadout">Measured <span id="mcpMeasReadout">&ndash;</span> <span class="current" id="mcpCurReadout">&ndash;</span></p>
+        </div>
+
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="k">Points logged</div><div class="v" id="statPoints">0</div></div>
+        <div class="stat"><div class="k">Session length</div><div class="v" id="statDuration">00:00</div></div>
+        <div class="stat"><div class="k">Last update</div><div class="v" id="statLastUpdate">&ndash;</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PLOT ================= -->
+  <section>
+    <div class="section-head">
+      <h2>Plot</h2>
+      <p>Pick a channel to watch live, or change the axes to look at the run any other way</p>
+    </div>
+    <div class="panel">
+      <div class="customControls">
+        <div class="field">
+          <label for="plotChannel">Channel</label>
+          <select id="plotChannel">
+            <option value="d1">DAC1</option>
+            <option value="d2">DAC2</option>
+            <option value="mcp">MCP4725</option>
+            <option value="all">All channels</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="plotX">X-axis</label>
+          <select id="plotX"></select>
+        </div>
+        <div class="field">
+          <label for="plotY">Y-axis</label>
+          <select id="plotY"></select>
+        </div>
+        <div class="field">
+          <label for="plotType">Plot type</label>
+          <select id="plotType">
+            <option value="line">Line</option>
+            <option value="scatter">Scatter</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="plotRange">Show</label>
+          <select id="plotRange">
+            <option value="recent">Last 60 points</option>
+            <option value="all">Whole session</option>
+          </select>
+        </div>
+        <label class="checkField"><input type="checkbox" id="plotLive" checked> Live update</label>
+        <button class="tinyBtn chartExportBtn" data-chart="main" style="margin-left:auto;">Export PNG</button>
+      </div>
+      <div class="chartCanvasWrap tall">
+        <canvas id="mainChartCanvas"></canvas>
+        <p class="chartFallback" id="chartFallback" hidden></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= DATA LOG ================= -->
+  <section>
+    <div class="section-head">
+      <h2>Data log</h2>
+      <p>Every point received from the board</p>
+    </div>
+    <div class="tableWrap" id="logTableScroll">
+      <table id="logTable">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>D1 set</th><th>D1 meas</th><th>D1 mA</th>
+            <th>D2 set</th><th>D2 meas</th><th>D2 mA</th>
+            <th>MCP set</th><th>MCP meas</th><th>MCP mA</th>
+          </tr>
+        </thead>
+        <tbody id="logTableBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= EXPORT ================= -->
+  <section>
+    <div class="section-head">
+      <h2>Export</h2>
+      <p>Save the run for your report or paper</p>
+    </div>
+    <div class="panel">
+      <div class="exportRow">
+        <button class="ghostBtn" id="exportExcelBtn">Export Excel (data + graphs)</button>
+        <button class="ghostBtn" id="exportCsvBtn">Export CSV</button>
+        <button class="ghostBtn" id="clearLogBtn">Clear log</button>
+      </div>
+      <details class="console">
+        <summary>Connection log</summary>
+        <div id="log"></div>
+      </details>
+    </div>
+  </section>
+
+  <footer>ESP32 DAC Control. Data stays in this browser tab until exported or cleared.</footer>
+</div>
+
+<script>
+  // ==================================================================
+  // Hardware protocol — unchanged from the working version.
+  // Do not alter these UUIDs or the message/telemetry formats below
+  // without also updating the ESP32 firmware.
+  // ==================================================================
+  const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+  const CONTROL_CHARACTERISTIC_UUID   = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+  const TELEMETRY_CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a9";
+
+  let bleDevice = null;
+  let controlCharacteristic = null;
+  let telemetryCharacteristic = null;
+
+  // Full in-memory log: {time, t, d1set, d1meas, d2set, d2meas, mcpset, mcpmeas}
+  const dataLog = [];
+  const MAX_POINTS_ON_STRIP = 60; // keep the live strip charts readable
+  let sessionStart = null;
+
+  const statusLed = document.getElementById("statusLed");
+  const statusText = document.getElementById("statusText");
+  const connectBtn = document.getElementById("connectBtn");
+  const logEl = document.getElementById("log");
+  const logTableBody = document.getElementById("logTableBody");
+  const logTableScroll = document.getElementById("logTableScroll");
+
+  function log(msg) {
+    const time = new Date().toLocaleTimeString();
+    logEl.textContent += `[${time}] ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // Surface any uncaught error on the page itself (not just the browser
+  // console) so a blocked CDN script or typo doesn't silently disable
+  // controls with no visible explanation.
+  window.addEventListener("error", (e) => {
+    log("PAGE ERROR: " + (e.message || e));
+  });
+
+  // Sweeps in progress get an abort callback pushed here, so a
+  // disconnect can stop them all instead of leaving one spinning.
+  const activeSweepStoppers = [];
+
+  function setConnected(isConnected) {
+    document.querySelectorAll(".sendBtn").forEach(b => b.disabled = !isConnected);
+    if (isConnected) {
+      statusText.textContent = "Connected";
+      statusLed.classList.add("connected");
+      connectBtn.textContent = "Reconnect";
+    } else {
+      statusText.textContent = "Not connected";
+      statusLed.classList.remove("connected");
+      activeSweepStoppers.forEach(stop => stop());
+    }
+  }
+
+  // --------------------------------------------------
+  // Channel slider/number/send wiring, plus the fixed/sweep
+  // mode toggle. Deliberately independent of Chart.js/ExcelJS,
+  // so the controls stay usable even if a charting library fails
+  // to load.
+  // --------------------------------------------------
+  async function sendValue(channelPrefix, voltage) {
+    if (!controlCharacteristic) {
+      log("Not connected yet.");
+      return;
+    }
+    const message = `${channelPrefix}:${voltage.toFixed(2)}`;
+    try {
+      const encoder = new TextEncoder();
+      await controlCharacteristic.writeValue(encoder.encode(message));
+      log("Sent: " + message);
+    } catch (err) {
+      log("Send failed: " + err);
+    }
+  }
+
+  function wireChannel(opts) {
+    const { prefix, channelId, rangeId, numberId, labelId, sendBtnId,
+            sweepMinId, sweepMaxId, sweepStepId, sweepDwellId,
+            sweepStartId, sweepStopId, sweepStatusId, min, max } = opts;
+
+    const channelEl = document.getElementById(channelId);
+    const range = document.getElementById(rangeId);
+    const number = document.getElementById(numberId);
+    const label = document.getElementById(labelId);
+    const sendBtn = document.getElementById(sendBtnId);
+
+    function updateLabel(v) { label.textContent = parseFloat(v).toFixed(2) + " V"; }
+
+    range.addEventListener("input", () => {
+      number.value = range.value;
+      updateLabel(range.value);
+    });
+    number.addEventListener("input", () => {
+      const lo = parseFloat(number.min), hi = parseFloat(number.max);
+      let v = Math.min(hi, Math.max(lo, parseFloat(number.value) || 0));
+      range.value = v;
+      updateLabel(v);
+    });
+    sendBtn.addEventListener("click", () => sendValue(prefix, parseFloat(range.value)));
+
+    // ---- Fixed / sweep mode toggle ----
+    const modeButtons = channelEl.querySelectorAll(".modeBtn");
+    const panes = channelEl.querySelectorAll(".modePane");
+    const switchEl = channelEl.querySelector(".modeSwitch");
+    modeButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        modeButtons.forEach(b => b.classList.remove("isActive"));
+        btn.classList.add("isActive");
+        const mode = btn.dataset.mode;
+        switchEl.dataset.active = mode;
+        panes.forEach(p => p.classList.toggle("isHidden", p.dataset.modePane !== mode));
+      });
+    });
+
+    // ---- Sweep ----
+    const sMin = document.getElementById(sweepMinId);
+    const sMax = document.getElementById(sweepMaxId);
+    const sStep = document.getElementById(sweepStepId);
+    const sDwell = document.getElementById(sweepDwellId);
+    const sStart = document.getElementById(sweepStartId);
+    const sStop = document.getElementById(sweepStopId);
+    const sStatus = document.getElementById(sweepStatusId);
+
+    let abortSweep = false;
+
+    async function runSweep() {
+      const lo = parseFloat(sMin.value), hi = parseFloat(sMax.value);
+      const step = parseFloat(sStep.value), dwell = parseFloat(sDwell.value);
+      if ([lo, hi, step, dwell].some(Number.isNaN) || step <= 0 || hi < lo || dwell < 0) {
+        log(`${prefix} sweep: check the min, max, step and dwell values.`);
+        return;
+      }
+      const clampedLo = Math.max(min, lo);
+      const clampedHi = Math.min(max, hi);
+      if (clampedLo !== lo || clampedHi !== hi) {
+        log(`${prefix} sweep: clamped to the channel range ${min} to ${max} V.`);
+      }
+
+      abortSweep = false;
+      sStart.disabled = true;
+      sStop.disabled = false;
+
+      const total = Math.floor((clampedHi - clampedLo) / step + 1e-9) + 1;
+      let i = 0;
+      let v = clampedLo;
+      while (v <= clampedHi + 1e-9 && !abortSweep) {
+        i++;
+        sStatus.textContent = `${i}/${total}: ${v.toFixed(2)} V`;
+        await sendValue(prefix, v);
+        await new Promise(r => setTimeout(r, dwell));
+        v += step;
+      }
+      sStatus.textContent = abortSweep ? "Stopped" : "Done";
+      sStart.disabled = false;
+      sStop.disabled = true;
+    }
+
+    sStart.addEventListener("click", runSweep);
+    sStop.addEventListener("click", () => { abortSweep = true; });
+    activeSweepStoppers.push(() => { abortSweep = true; });
+  }
+
+  wireChannel({
+    prefix: "D1", channelId: "d1Channel",
+    rangeId: "d1Range", numberId: "d1Number", labelId: "d1Label", sendBtnId: "d1Send",
+    sweepMinId: "d1SweepMin", sweepMaxId: "d1SweepMax", sweepStepId: "d1SweepStep",
+    sweepDwellId: "d1SweepDwell", sweepStartId: "d1SweepStart", sweepStopId: "d1SweepStop",
+    sweepStatusId: "d1SweepStatus", min: 0, max: 3.3,
+  });
+  wireChannel({
+    prefix: "D2", channelId: "d2Channel",
+    rangeId: "d2Range", numberId: "d2Number", labelId: "d2Label", sendBtnId: "d2Send",
+    sweepMinId: "d2SweepMin", sweepMaxId: "d2SweepMax", sweepStepId: "d2SweepStep",
+    sweepDwellId: "d2SweepDwell", sweepStartId: "d2SweepStart", sweepStopId: "d2SweepStop",
+    sweepStatusId: "d2SweepStatus", min: 0, max: 3.3,
+  });
+  wireChannel({
+    prefix: "MCP", channelId: "mcpChannel",
+    rangeId: "mcpRange", numberId: "mcpNumber", labelId: "mcpLabel", sendBtnId: "mcpSend",
+    sweepMinId: "mcpSweepMin", sweepMaxId: "mcpSweepMax", sweepStepId: "mcpSweepStep",
+    sweepDwellId: "mcpSweepDwell", sweepStartId: "mcpSweepStart", sweepStopId: "mcpSweepStop",
+    sweepStatusId: "mcpSweepStatus", min: 0, max: 2.0,
+  });
+
+  // --------------------------------------------------
+  // Field definitions used by the custom-plot axis pickers
+  // and by the Excel/CSV export.
+  // --------------------------------------------------
+  const FIELDS = {
+    time:   { label: "Time (s)",           unit: "s", get: e => e.t },
+    d1set:  { label: "DAC1 set (V)",       unit: "V", get: e => e.d1set },
+    d1meas: { label: "DAC1 measured (V)",  unit: "V", get: e => e.d1meas },
+    d1cur:  { label: "DAC1 current (mA)",  unit: "mA", get: e => e.d1cur },
+    d2set:  { label: "DAC2 set (V)",       unit: "V", get: e => e.d2set },
+    d2meas: { label: "DAC2 measured (V)",  unit: "V", get: e => e.d2meas },
+    d2cur:  { label: "DAC2 current (mA)",  unit: "mA", get: e => e.d2cur },
+    mcpset: { label: "MCP4725 set (V)",    unit: "V", get: e => e.mcpset },
+    mcpmeas:{ label: "MCP4725 measured (V)", unit: "V", get: e => e.mcpmeas },
+    mcpcur: { label: "MCP4725 current (mA)", unit: "mA", get: e => e.mcpcur },
+  };
+
+  // Grouped Y-axis views: picking a channel plots its set, measured
+  // and current together, which is what the live strip view used to do.
+  const CHANNELS = {
+    d1:  { label: "DAC1",    setKey: "d1set",  measKey: "d1meas",  curKey: "d1cur"  },
+    d2:  { label: "DAC2",    setKey: "d2set",  measKey: "d2meas",  curKey: "d2cur"  },
+    mcp: { label: "MCP4725", setKey: "mcpset", measKey: "mcpmeas", curKey: "mcpcur" },
+  };
+
+  // --------------------------------------------------
+  // Plot controls. These are built BEFORE (and independently of)
+  // Chart.js, so a blocked CDN leaves you with empty-looking
+  // dropdowns no more — the pickers always populate, and the chart
+  // area explains itself if the library is missing.
+  // --------------------------------------------------
+  let chartsReady = false;
+  let mainChart;
+
+  const plotChannelSelect = document.getElementById("plotChannel");
+  const plotXSelect = document.getElementById("plotX");
+  const plotYSelect = document.getElementById("plotY");
+  const plotTypeSelect = document.getElementById("plotType");
+  const plotRangeSelect = document.getElementById("plotRange");
+  const plotLiveCheckbox = document.getElementById("plotLive");
+  const chartFallback = document.getElementById("chartFallback");
+
+  const COLOR_SET = "#E2A83F";
+  const COLOR_MEAS = "#57C7B4";
+  const COLOR_CURRENT = "#6FBF8B";
+  const ROLE_LABEL = { set: "Set (V)", meas: "Measured (V)", cur: "Current (mA)" };
+
+  // Every channel has the same three roles, so the axis pickers can
+  // stay short ("Measured") and let the channel dropdown say which
+  // board output that refers to.
+  function fieldForRole(channelKey, role) {
+    const ch = CHANNELS[channelKey];
+    return role === "set" ? ch.setKey : role === "meas" ? ch.measKey : ch.curKey;
+  }
+
+  function roleOfField(fieldKey) {
+    for (const ch of Object.values(CHANNELS)) {
+      if (ch.setKey === fieldKey) return "set";
+      if (ch.measKey === fieldKey) return "meas";
+      if (ch.curKey === fieldKey) return "cur";
+    }
+    return null;
+  }
+
+  function addOption(parent, value, label) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    parent.appendChild(opt);
+  }
+
+  function addGroup(parent, label) {
+    const group = document.createElement("optgroup");
+    group.label = label;
+    parent.appendChild(group);
+    return group;
+  }
+
+  // Rebuilds the axis lists for whichever channel is selected, keeping
+  // you on the same quantity when you hop between channels.
+  function buildAxisOptions() {
+    const chKey = plotChannelSelect.value;
+    const prevX = plotXSelect.value;
+    const prevY = plotYSelect.value;
+
+    plotXSelect.innerHTML = "";
+    plotYSelect.innerHTML = "";
+
+    addOption(plotXSelect, "time", "Time (s)");
+
+    if (chKey === "all") {
+      Object.entries(CHANNELS).forEach(([key, ch]) => {
+        const gx = addGroup(plotXSelect, ch.label);
+        ["set", "meas", "cur"].forEach(r => addOption(gx, fieldForRole(key, r), ROLE_LABEL[r]));
+      });
+
+      const gWhole = addGroup(plotYSelect, "One channel, everything");
+      Object.entries(CHANNELS).forEach(([key, ch]) =>
+        addOption(gWhole, "ch:" + key, `${ch.label} — set, measured & current`));
+
+      const gCompare = addGroup(plotYSelect, "All channels overlaid");
+      addOption(gCompare, "all:set", "Set voltage");
+      addOption(gCompare, "all:meas", "Measured voltage");
+      addOption(gCompare, "all:cur", "Current");
+
+      Object.entries(CHANNELS).forEach(([key, ch]) => {
+        const gy = addGroup(plotYSelect, ch.label);
+        ["set", "meas", "cur"].forEach(r => addOption(gy, fieldForRole(key, r), ROLE_LABEL[r]));
+      });
+    } else {
+      ["set", "meas", "cur"].forEach(r => addOption(plotXSelect, fieldForRole(chKey, r), ROLE_LABEL[r]));
+      addOption(plotYSelect, "ch:" + chKey, "Set, measured & current");
+      ["set", "meas", "cur"].forEach(r => addOption(plotYSelect, fieldForRole(chKey, r), ROLE_LABEL[r]));
+    }
+
+    restoreSelection(plotXSelect, prevX, chKey, "time");
+    restoreSelection(plotYSelect, prevY, chKey, chKey === "all" ? "all:meas" : "ch:" + chKey);
+  }
+
+  function restoreSelection(select, previous, chKey, fallback) {
+    select.value = previous;
+    if (select.selectedIndex !== -1) return;
+
+    // Same quantity, different channel: e.g. DAC1 measured -> DAC2 measured.
+    if (chKey !== "all") {
+      let role = roleOfField(previous);
+      if (!role && previous.startsWith("all:")) role = previous.slice(4);
+      if (!role && previous.startsWith("ch:")) { select.value = "ch:" + chKey; if (select.selectedIndex !== -1) return; }
+      if (role) {
+        select.value = fieldForRole(chKey, role);
+        if (select.selectedIndex !== -1) return;
+      }
+    }
+    select.value = fallback;
+    if (select.selectedIndex === -1) select.selectedIndex = 0;
+  }
+
+  plotChannelSelect.addEventListener("change", () => { buildAxisOptions(); renderPlot(); });
+  [plotXSelect, plotYSelect, plotTypeSelect, plotRangeSelect]
+    .forEach(el => el.addEventListener("change", renderPlot));
+
+  plotChannelSelect.value = "d1";
+  buildAxisOptions();
+
+  // --------------------------------------------------
+  // Chart setup — one chart for everything. The channel and axis
+  // pickers decide whether it behaves as a live strip chart
+  // (X = time, Y = a whole channel) or as an arbitrary X-vs-Y plot.
+  // Wrapped in try/catch: if Chart.js failed to load, the rest of
+  // the page (sliders, BLE, table, CSV export) still works.
+  // --------------------------------------------------
+  try {
+    if (typeof Chart === "undefined") throw new Error("Chart.js did not load from the CDN.");
+
+    const darkPanelPlugin = {
+      id: "darkPanel",
+      beforeDraw(chart) {
+        const { ctx, width, height } = chart;
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-over";
+        ctx.fillStyle = "#292C31";
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+      }
+    };
+    Chart.register(darkPanelPlugin);
+
+    const gridColor = "#3A3D42";
+    const tickColor = "#8D9095";
+
+    mainChart = new Chart(document.getElementById("mainChartCanvas").getContext("2d"), {
+      type: "line",
+      data: { datasets: [] },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,
+        scales: {
+          x: { type: "linear", title: { display: true, text: FIELDS.time.label, color: tickColor }, ticks: { color: tickColor }, grid: { color: gridColor } },
+          y: { type: "linear", position: "left", title: { display: true, text: "Voltage (V)", color: tickColor }, suggestedMin: 0, ticks: { color: tickColor }, grid: { color: gridColor } },
+          y1: { type: "linear", position: "right", display: false, title: { display: true, text: "Current (mA)", color: tickColor }, suggestedMin: 0, ticks: { color: tickColor }, grid: { drawOnChartArea: false } }
+        },
+        plugins: { legend: { display: true, position: "top", labels: { boxWidth: 12, font: { size: 10 }, color: tickColor } } }
+      }
+    });
+
+    chartsReady = true;
+    renderPlot();
+  } catch (err) {
+    chartFallback.hidden = false;
+    chartFallback.textContent =
+      "The chart library couldn't load, so there's nothing to draw here. " +
+      "Check your internet connection and reload — the controls, data log and exports all still work.";
+    log("Chart unavailable: " + err.message + " — sliders, connection and CSV export still work normally.");
+  }
+
+  // Turns the Y-axis choice into the series to draw: one channel's
+  // three quantities, the same quantity across all channels, or a
+  // single field on its own.
+  function seriesForYValue(yValue) {
+    if (yValue.startsWith("ch:")) {
+      const ch = CHANNELS[yValue.slice(3)];
+      return {
+        yTitle: "Voltage (V)",
+        series: [
+          { label: `${ch.label} set`, get: FIELDS[ch.setKey].get, color: COLOR_SET, dash: [4, 2], axis: "y" },
+          { label: `${ch.label} measured`, get: FIELDS[ch.measKey].get, color: COLOR_MEAS, axis: "y" },
+          { label: `${ch.label} current`, get: FIELDS[ch.curKey].get, color: COLOR_CURRENT, axis: "y1" },
+        ]
+      };
+    }
+
+    if (yValue.startsWith("all:")) {
+      const role = yValue.slice(4);
+      const palette = [COLOR_SET, COLOR_MEAS, COLOR_CURRENT];
+      return {
+        yTitle: role === "cur" ? "Current (mA)" : "Voltage (V)",
+        series: Object.entries(CHANNELS).map(([key, ch], i) => ({
+          label: `${ch.label} ${role === "cur" ? "current" : role === "set" ? "set" : "measured"}`,
+          get: FIELDS[fieldForRole(key, role)].get,
+          color: palette[i],
+          dash: role === "set" ? [4, 2] : [],
+          axis: "y",
+        }))
+      };
+    }
+
+    const f = FIELDS[yValue];
+    return {
+      yTitle: f.label,
+      series: [{ label: f.label, get: f.get, color: f.unit === "mA" ? COLOR_CURRENT : COLOR_MEAS, axis: "y" }]
+    };
+  }
+
+  // Rebuilds the whole chart from the log. Cheap enough to run on
+  // every packet, and it means switching channel or axes shows the
+  // history straight away instead of starting from an empty plot.
+  function renderPlot() {
+    if (!chartsReady) return;
+
+    const xField = FIELDS[plotXSelect.value] || FIELDS.time;
+    const { series, yTitle } = seriesForYValue(plotYSelect.value);
+    const isLine = plotTypeSelect.value === "line";
+    const rows = plotRangeSelect.value === "all" ? dataLog : dataLog.slice(-MAX_POINTS_ON_STRIP);
+
+    const valid = v => v !== null && v !== undefined && !Number.isNaN(v);
+
+    mainChart.data.datasets = series.map(s => {
+      const points = rows
+        .map(e => ({ x: xField.get(e), y: s.get(e) }))
+        .filter(p => valid(p.x) && valid(p.y))
+        .sort((a, b) => a.x - b.x);
+      return {
+        label: s.label,
+        data: points,
+        borderColor: s.color,
+        backgroundColor: s.color,
+        borderDash: s.dash || [],
+        borderWidth: 2,
+        showLine: isLine,
+        pointRadius: isLine ? 0 : 3,
+        yAxisID: s.axis,
+        parsing: false,
+      };
+    });
+
+    // Only give up space to the right-hand current axis when there is
+    // current data to put on it.
+    const hasCurrent = mainChart.data.datasets.some(ds => ds.yAxisID === "y1" && ds.data.length > 0);
+    mainChart.options.scales.y1.display = hasCurrent;
+    mainChart.data.datasets.forEach(ds => { if (ds.yAxisID === "y1") ds.hidden = !hasCurrent; });
+
+    mainChart.options.scales.x.title.text = xField.label;
+    mainChart.options.scales.y.title.text = yTitle;
+    mainChart.options.plugins.legend.display = mainChart.data.datasets.length > 1;
+
+    mainChart.update();
+  }
+
+
+
+  // --------------------------------------------------
+  // Table + stats
+  // --------------------------------------------------
+  // Current cells show a dash when the board didn't report one.
+  function fmtCurrent(v) {
+    return (v === null || v === undefined) ? "&ndash;" : v.toFixed(2);
+  }
+
+  function pushToTable(entry) {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${entry.time}</td>
+      <td>${entry.d1set.toFixed(2)}</td><td>${entry.d1meas.toFixed(2)}</td><td>${fmtCurrent(entry.d1cur)}</td>
+      <td>${entry.d2set.toFixed(2)}</td><td>${entry.d2meas.toFixed(2)}</td><td>${fmtCurrent(entry.d2cur)}</td>
+      <td>${entry.mcpset.toFixed(2)}</td><td>${entry.mcpmeas.toFixed(2)}</td><td>${fmtCurrent(entry.mcpcur)}</td>
+    `;
+    logTableBody.appendChild(row);
+    logTableScroll.scrollTop = logTableScroll.scrollHeight;
+  }
+
+  function updateStats(entry) {
+    document.getElementById("statPoints").textContent = dataLog.length;
+    const mm = Math.floor(entry.t / 60).toString().padStart(2, "0");
+    const ss = Math.floor(entry.t % 60).toString().padStart(2, "0");
+    document.getElementById("statDuration").textContent = `${mm}:${ss}`;
+    document.getElementById("statLastUpdate").textContent = entry.time;
+    document.getElementById("d1MeasReadout").textContent = entry.d1meas.toFixed(2) + " V";
+    document.getElementById("d2MeasReadout").textContent = entry.d2meas.toFixed(2) + " V";
+    document.getElementById("mcpMeasReadout").textContent = entry.mcpmeas.toFixed(2) + " V";
+    [["d1CurReadout", entry.d1cur], ["d2CurReadout", entry.d2cur], ["mcpCurReadout", entry.mcpcur]]
+      .forEach(([id, v]) => {
+        document.getElementById(id).textContent =
+          (v === null || v === undefined) ? "\u2013" : v.toFixed(2) + " mA";
+      });
+  }
+
+  // --------------------------------------------------
+  // Connect
+  // --------------------------------------------------
+  connectBtn.addEventListener("click", async () => {
+    if (!navigator.bluetooth) {
+      log("ERROR: Web Bluetooth not supported. Use Chrome or Edge.");
+      return;
+    }
+    try {
+      log("Requesting Bluetooth device...");
+      bleDevice = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SERVICE_UUID] }]
+      });
+
+      bleDevice.addEventListener("gattserverdisconnected", () => {
+        log("Device disconnected.");
+        setConnected(false);
+      });
+
+      log("Connecting to GATT server...");
+      const server = await bleDevice.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+
+      log("Getting control characteristic...");
+      controlCharacteristic = await service.getCharacteristic(CONTROL_CHARACTERISTIC_UUID);
+
+      log("Getting telemetry characteristic and subscribing...");
+      telemetryCharacteristic = await service.getCharacteristic(TELEMETRY_CHARACTERISTIC_UUID);
+      await telemetryCharacteristic.startNotifications();
+      telemetryCharacteristic.addEventListener("characteristicvaluechanged", onTelemetryReceived);
+
+      log("Connected and ready.");
+      setConnected(true);
+    } catch (err) {
+      log("Connection failed: " + err);
+      setConnected(false);
+    }
+  });
+
+  // --------------------------------------------------
+  // Telemetry. Three accepted layouts, so this page still works
+  // with older firmware that doesn't report current:
+  //   6 values: d1set,d1meas,d2set,d2meas,mcpset,mcpmeas
+  //   7 values: ...same six..., current        (one shared sensor)
+  //   9 values: d1set,d1meas,d1cur, d2set,d2meas,d2cur, mcpset,mcpmeas,mcpcur
+  // Current is logged and plotted in mA.
+  // --------------------------------------------------
+  function onTelemetryReceived(event) {
+    const decoder = new TextDecoder("utf-8");
+    const text = decoder.decode(event.target.value);
+    const parts = text.split(",").map(parseFloat);
+
+    if (![6, 7, 9].includes(parts.length) || parts.some(isNaN)) {
+      log("Malformed telemetry (expected 6, 7 or 9 values): " + text);
+      return;
+    }
+
+    if (sessionStart === null) sessionStart = Date.now();
+
+    let volts, currents;
+    if (parts.length === 9) {
+      volts = [parts[0], parts[1], parts[3], parts[4], parts[6], parts[7]];
+      currents = [parts[2], parts[5], parts[8]];
+    } else if (parts.length === 7) {
+      volts = parts.slice(0, 6);
+      currents = [parts[6], parts[6], parts[6]];
+    } else {
+      volts = parts;
+      currents = [null, null, null];
+    }
+
+    const entry = {
+      time: new Date().toLocaleTimeString(),
+      t: (Date.now() - sessionStart) / 1000,
+      d1set: volts[0], d1meas: volts[1], d1cur: currents[0],
+      d2set: volts[2], d2meas: volts[3], d2cur: currents[1],
+      mcpset: volts[4], mcpmeas: volts[5], mcpcur: currents[2],
+    };
+
+    dataLog.push(entry);
+    if (chartsReady && plotLiveCheckbox.checked) renderPlot();
+    pushToTable(entry);
+    updateStats(entry);
+  }
+
+  // --------------------------------------------------
+  // Export: CSV
+  // --------------------------------------------------
+  document.getElementById("exportCsvBtn").addEventListener("click", () => {
+    if (dataLog.length === 0) {
+      log("Nothing to export yet.");
+      return;
+    }
+    const csvNum = v => (v === null || v === undefined) ? "" : v;
+    const header = "time,elapsed_s,d1_set,d1_measured,d1_current_mA," +
+                   "d2_set,d2_measured,d2_current_mA,mcp_set,mcp_measured,mcp_current_mA\n";
+    const rows = dataLog.map(e =>
+      `${e.time},${e.t.toFixed(2)},${e.d1set},${e.d1meas},${csvNum(e.d1cur)},` +
+      `${e.d2set},${e.d2meas},${csvNum(e.d2cur)},${e.mcpset},${e.mcpmeas},${csvNum(e.mcpcur)}`
+    ).join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "dac_log_" + Date.now() + ".csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    log("CSV exported.");
+  });
+
+  // --------------------------------------------------
+  // Export: Excel workbook with data + embedded graphs
+  // --------------------------------------------------
+  const chartsByKey = chartsReady
+    ? { main: mainChart }
+    : {};
+
+  document.getElementById("exportExcelBtn").addEventListener("click", async () => {
+    if (typeof ExcelJS === "undefined") {
+      log("ERROR: ExcelJS did not load — check your internet connection.");
+      return;
+    }
+    if (dataLog.length === 0) {
+      log("Nothing to export yet.");
+      return;
+    }
+    try {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "ESP32 DAC Control";
+      wb.created = new Date();
+
+      const dataSheet = wb.addWorksheet("Data Log");
+      dataSheet.columns = [
+        { header: "Time", key: "time", width: 12 },
+        { header: "Elapsed (s)", key: "t", width: 12 },
+        { header: "DAC1 set (V)", key: "d1set", width: 13 },
+        { header: "DAC1 measured (V)", key: "d1meas", width: 16 },
+        { header: "DAC1 current (mA)", key: "d1cur", width: 16 },
+        { header: "DAC2 set (V)", key: "d2set", width: 13 },
+        { header: "DAC2 measured (V)", key: "d2meas", width: 16 },
+        { header: "DAC2 current (mA)", key: "d2cur", width: 16 },
+        { header: "MCP4725 set (V)", key: "mcpset", width: 15 },
+        { header: "MCP4725 measured (V)", key: "mcpmeas", width: 18 },
+        { header: "MCP4725 current (mA)", key: "mcpcur", width: 18 },
+      ];
+      dataSheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+      dataSheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF20344E" } };
+      dataLog.forEach(e => dataSheet.addRow({
+        time: e.time, t: Number(e.t.toFixed(2)),
+        d1set: e.d1set, d1meas: e.d1meas, d1cur: e.d1cur ?? null,
+        d2set: e.d2set, d2meas: e.d2meas, d2cur: e.d2cur ?? null,
+        mcpset: e.mcpset, mcpmeas: e.mcpmeas, mcpcur: e.mcpcur ?? null
+      }));
+      dataSheet.views = [{ state: "frozen", ySplit: 1 }];
+
+      if (chartsReady) {
+        const chartSheet = wb.addWorksheet("Charts");
+        let row = 1;
+
+        function embed(title, canvas) {
+          chartSheet.getCell(`A${row}`).value = title;
+          chartSheet.getCell(`A${row}`).font = { bold: true, size: 12 };
+          row += 1;
+          const imgId = wb.addImage({ base64: canvas.toDataURL("image/png", 1.0), extension: "png" });
+          chartSheet.addImage(imgId, { tl: { col: 0, row: row }, ext: { width: 620, height: 300 } });
+          row += 17;
+        }
+
+        // The page has one chart, so step it through each channel
+        // over the whole session to build a report-ready set, then
+        // put the controls back exactly where the user left them.
+        const saved = {
+          channel: plotChannelSelect.value, x: plotXSelect.value, y: plotYSelect.value,
+          type: plotTypeSelect.value, range: plotRangeSelect.value
+        };
+
+        plotTypeSelect.value = "line";
+        plotRangeSelect.value = "all";
+        for (const [key, ch] of Object.entries(CHANNELS)) {
+          plotChannelSelect.value = key;
+          buildAxisOptions();
+          plotXSelect.value = "time";
+          plotYSelect.value = "ch:" + key;
+          renderPlot();
+          await new Promise(r => requestAnimationFrame(r));
+          embed(`${ch.label}: set, measured and current over time`, mainChart.canvas);
+        }
+
+        plotChannelSelect.value = saved.channel;
+        buildAxisOptions();
+        plotXSelect.value = saved.x;
+        plotYSelect.value = saved.y;
+        plotTypeSelect.value = saved.type;
+        plotRangeSelect.value = saved.range;
+        renderPlot();
+        await new Promise(r => requestAnimationFrame(r));
+
+        // Add the user's own view too, unless it's already one of the above.
+        const isDuplicate = saved.x === "time" && saved.type === "line" &&
+                            saved.range === "all" && saved.y.startsWith("ch:");
+        if (!isDuplicate) {
+          const yLabel = saved.y.startsWith("ch:") ? CHANNELS[saved.y.slice(3)].label
+                       : saved.y.startsWith("all:") ? "All channels"
+                       : FIELDS[saved.y].label;
+          embed(`${yLabel} vs. ${FIELDS[saved.x].label}`, mainChart.canvas);
+        }
+      } else {
+        log("Charts were unavailable, so the workbook only contains the data log.");
+      }
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/octet-stream" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "dac_measurement_" + Date.now() + ".xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+      log("Excel exported (data log + charts).");
+    } catch (err) {
+      log("Excel export failed: " + err);
+    }
+  });
+
+  // --------------------------------------------------
+  // Export: PNG per chart
+  // --------------------------------------------------
+  document.querySelectorAll(".chartExportBtn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const chart = chartsByKey[btn.dataset.chart];
+      if (!chart) {
+        log("That chart isn't available — Chart.js failed to load.");
+        return;
+      }
+      const yVal = plotYSelect.value;
+      const name = yVal.startsWith("ch:") ? yVal.slice(3)
+                 : yVal.startsWith("all:") ? "all_" + yVal.slice(4)
+                 : yVal;
+      const url = chart.toBase64Image();
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `dac_${name}_${Date.now()}.png`;
+      a.click();
+      log(`${name} chart exported as PNG.`);
+    });
+  });
+
+  // --------------------------------------------------
+  // Clear log
+  // --------------------------------------------------
+  document.getElementById("clearLogBtn").addEventListener("click", () => {
+    dataLog.length = 0;
+    sessionStart = null;
+    if (chartsReady) renderPlot();
+    logTableBody.innerHTML = "";
+    document.getElementById("statPoints").textContent = "0";
+    document.getElementById("statDuration").textContent = "00:00";
+    document.getElementById("statLastUpdate").textContent = "–";
+    ["d1MeasReadout", "d2MeasReadout", "mcpMeasReadout",
+     "d1CurReadout", "d2CurReadout", "mcpCurReadout"]
+      .forEach(id => document.getElementById(id).textContent = "–");
+    log("Log cleared.");
+  });
+</script>
+
+</body>
+</html>
